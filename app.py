@@ -76,6 +76,28 @@ def convert_value_by_type(value, target_type):
         st.warning(f"値 '{value}' を型 '{target_type}' に変換できませんでした: {e}")
         return value
 
+def check_column_type_consistency(df, column_name):
+    """列内のデータ型の一貫性をチェック"""
+    series = df[column_name]
+    
+    # 欠損値を除外
+    non_null_series = series.dropna()
+    
+    if len(non_null_series) == 0:
+        return True, "列にデータがありません"
+    
+    # 各値の型を確認
+    type_counts = {}
+    for value in non_null_series:
+        value_type = type(value).__name__
+        type_counts[value_type] = type_counts.get(value_type, 0) + 1
+    
+    # 型が2つ以上ある場合は不整合
+    if len(type_counts) > 1:
+        return False, f"列内に複数の型が存在します: {dict(type_counts)}"
+    
+    return True, "型の一貫性に問題ありません"
+
 def apply_column_type_conversion(df, value_changes):
     """列全体の型変換を適用"""
     result_df = df.copy()
@@ -334,7 +356,9 @@ if st.session_state.df is not None:
                 # データフレームのコピーを作成
                 result_df = df.copy()
                 
-                # 値の変換を実行
+                # 値の変換を実行（修正版）
+                conversion_log = []  # 変換ログを記録
+                
                 for column, changes in st.session_state.value_changes.items():
                     if column in result_df.columns:
                         for old_val, change_info in changes.items():
@@ -344,21 +368,57 @@ if st.session_state.df is not None:
                             else:
                                 new_val = change_info
                             
-                            # 元の値の型を確認して適切に変換
+                            # 変換前の値の数をカウント
+                            before_count = (result_df[column] == old_val).sum()
+                            
+                            # 型を考慮した値の置換
                             original_series = result_df[column]
                             if pd.api.types.is_numeric_dtype(original_series):
                                 try:
-                                    # 数値列の場合、old_valを数値に変換して置換
-                                    old_val_converted = pd.to_numeric(old_val, errors='coerce')
-                                    if not pd.isna(old_val_converted):
-                                        result_df[column] = result_df[column].replace(old_val_converted, new_val)
+                                    # 数値型の場合、old_valを適切な型に変換
+                                    if pd.api.types.is_integer_dtype(original_series):
+                                        old_val_converted = int(float(old_val))
                                     else:
-                                        result_df[column] = result_df[column].replace(old_val, new_val)
-                                except:
-                                    result_df[column] = result_df[column].replace(old_val, new_val)
+                                        old_val_converted = float(old_val)
+                                    
+                                    # 置換実行
+                                    mask = result_df[column] == old_val_converted
+                                    result_df.loc[mask, column] = new_val
+                                    
+                                    # 変換後の確認
+                                    after_count = mask.sum()
+                                    conversion_log.append({
+                                        'column': column,
+                                        'old_val': old_val,
+                                        'new_val': new_val,
+                                        'converted_count': after_count,
+                                        'expected_count': before_count
+                                    })
+                                    
+                                except (ValueError, TypeError):
+                                    # 数値変換に失敗した場合は文字列として処理
+                                    mask = result_df[column].astype(str) == str(old_val)
+                                    result_df.loc[mask, column] = new_val
+                                    after_count = mask.sum()
+                                    conversion_log.append({
+                                        'column': column,
+                                        'old_val': old_val,
+                                        'new_val': new_val,
+                                        'converted_count': after_count,
+                                        'expected_count': before_count
+                                    })
                             else:
-                                # 文字列列の場合はそのまま置換
-                                result_df[column] = result_df[column].replace(old_val, new_val)
+                                # 文字列型の場合
+                                mask = result_df[column].astype(str) == str(old_val)
+                                result_df.loc[mask, column] = new_val
+                                after_count = mask.sum()
+                                conversion_log.append({
+                                    'column': column,
+                                    'old_val': old_val,
+                                    'new_val': new_val,
+                                    'converted_count': after_count,
+                                    'expected_count': before_count
+                                })
                 
                 # 列全体の型変換を適用
                 result_df = apply_column_type_conversion(result_df, st.session_state.value_changes)
@@ -367,8 +427,31 @@ if st.session_state.df is not None:
                 if st.session_state.column_renames:
                     result_df = result_df.rename(columns=st.session_state.column_renames)
                 
-                st.session_state.result_df = result_df
-                st.success("変換が完了しました！")
+                # データ型の整合性チェック
+                type_errors = []
+                for column in result_df.columns:
+                    is_consistent, message = check_column_type_consistency(result_df, column)
+                    if not is_consistent:
+                        type_errors.append(f"列 '{column}': {message}")
+                
+                # エラーがある場合は警告を表示
+                if type_errors:
+                    st.error("⚠️ 変換でエラーが発生しました:")
+                    for error in type_errors:
+                        st.error(f"• {error}")
+                    
+                    # エラーがあっても結果は保存（ユーザーが確認できるように）
+                    st.session_state.result_df = result_df
+                    st.warning("変換結果は保存されましたが、上記のエラーを確認してください。")
+                else:
+                    st.session_state.result_df = result_df
+                    st.success("変換が正常に完了しました！")
+                
+                # 変換ログの表示
+                if conversion_log:
+                    with st.expander("変換の詳細ログ"):
+                        for log in conversion_log:
+                            st.write(f"列 '{log['column']}': {log['old_val']} → {log['new_val']} ({log['converted_count']}件変換)")
                 
             except Exception as e:
                 st.error(f"変換中にエラーが発生しました: {e}")
