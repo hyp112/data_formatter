@@ -136,11 +136,11 @@ def apply_column_type_conversion(df, value_changes):
 def create_conversion_template():
     """変換表のテンプレートExcelファイルを作成"""
     template_data = {
-        'col_original': ['元の列名1', '元の列名2', '元の列名2'],
-        'col_new': ['新しい列名1', '新しい列名2', '新しい列名2'], 
-        'data_type': ['string', 'string', 'string'],
-        'original_value': ['', '元の値1', '元の値2'],
-        'new_value': ['', '新しい値1', '新しい値2']
+        'col_original': ['番号', '性別', '性別'],
+        'col_new': ['ID', 'gender', 'gender'], 
+        'data_type': ['string', 'factor', 'factor'],
+        'original_value': ['', '1', '0'],
+        'new_value': ['', 'male', 'female']
     }
     template_df = pd.DataFrame(template_data)
     return template_df
@@ -177,23 +177,6 @@ def parse_conversion_table(conversion_df):
             }
     
     return column_renames, value_changes
-
-st.sidebar.header("操作ガイド")
-st.sidebar.markdown("""
-CSVファイルをアップロードすると、列名の変更と指定した列の値の変更ができます
-
-**2つの変換方法：**
-1. **入力して変換**: 画面で1つずつ設定
-2. **変換表で変換**: Excelファイルで一括設定
-
-例）
-
-・列名の変更：
-                    年齢→age
-
-・値の変更：
-                    prefecture列 13→東京都(factor型)
-""")
 
 # ============================================
 # ファイルのアップロード
@@ -409,24 +392,6 @@ if st.session_state.df is not None:
         st.write("**1. 変換表テンプレートをダウンロード**")
         template_df = create_conversion_template()
         
-        # テンプレートの説明
-        with st.expander("変換表の使い方"):
-            st.write("""
-            **列の説明:**
-            - **col_original**: 元の列名
-            - **col_new**: 新しい列名
-            - **data_type**: データ型 (string, int, float, bool, factor, date)
-            - **original_value**: 変換前の値（空欄の場合は列名変更のみ）
-            - **new_value**: 変換後の値（空欄の場合は列名変更のみ）
-            
-            **変換ルール:**
-            1. **列名変更**: col_originalとcol_newが異なり、original_valueとnew_valueが空の場合
-            2. **値変換**: original_valueとnew_valueに値がある場合
-            """)
-            
-            st.write("**テンプレート例:**")
-            st.dataframe(template_df, use_container_width=True)
-        
         # テンプレートをExcelとしてダウンロード
         from io import BytesIO
         buffer = BytesIO()
@@ -439,6 +404,17 @@ if st.session_state.df is not None:
             file_name="conversion_template.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+        # テンプレートの説明
+        with st.expander("変換表の使い方"):
+            st.write("""
+            
+            **記入方法:**
+            1. **列名変更**をしたいときは、**original_valueとnew_valueは空白にして、**col_newを入力します。
+            2. **値の変換**をしたいときは、**col_originalとcol_newを同じにして、**original_valueとnew_valueを入力します。その際、data_typeの型でnew_valueに変換されます。
+            """)
+            
+            st.write("**テンプレート例:**")
+            st.dataframe(template_df, use_container_width=True)
         
         # 変換表のアップロード
         st.write("**2. 変換表をアップロード**")
