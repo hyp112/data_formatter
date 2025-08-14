@@ -7,12 +7,12 @@ from datetime import datetime
 # ページ設定
 # ============================================
 st.set_page_config(
-    page_title="データ整形アプリ",
+    page_title="ノーコードデータ整形",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title('データ整形アプリ')
+st.title('ノーコード データ整形アプリ')
 
 # セッション状態の初期化
 if 'df' not in st.session_state:
@@ -664,3 +664,13 @@ if st.session_state.df is not None:
 
 else:
     st.info("👆 CSVファイルをアップロードしてください")
+
+st.markdown("---")
+st.markdown(
+    """
+    <div style='text-align: center; font-size: 0.9em; color: gray;'>
+    🄫 2025 Kyohei Suzuki</a>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
