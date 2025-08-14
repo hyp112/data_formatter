@@ -133,9 +133,58 @@ def apply_column_type_conversion(df, value_changes):
     
     return result_df
 
+def create_conversion_template():
+    """変換表のテンプレートExcelファイルを作成"""
+    template_data = {
+        'col_original': ['元の列名1', '元の列名2', '元の列名2'],
+        'col_new': ['新しい列名1', '新しい列名2', '新しい列名2'], 
+        'data_type': ['string', 'string', 'string'],
+        'original_value': ['', '元の値1', '元の値2'],
+        'new_value': ['', '新しい値1', '新しい値2']
+    }
+    template_df = pd.DataFrame(template_data)
+    return template_df
+
+def parse_conversion_table(conversion_df):
+    """変換表を解析してcolumn_renamesとvalue_changesに変換"""
+    column_renames = {}
+    value_changes = {}
+    
+    for _, row in conversion_df.iterrows():
+        col_original = row['col_original']
+        col_new = row['col_new']
+        data_type = row['data_type']
+        original_value = row['original_value']
+        new_value = row['new_value']
+        
+        # 列名変更の処理
+        if pd.notna(col_original) and pd.notna(col_new) and col_original != col_new:
+            column_renames[col_original] = col_new
+        
+        # 値変換の処理
+        if pd.notna(original_value) and pd.notna(new_value) and original_value != '' and new_value != '':
+            target_column = col_new if pd.notna(col_new) else col_original
+            
+            if target_column not in value_changes:
+                value_changes[target_column] = {}
+            
+            # 型に応じて値を変換
+            converted_value = convert_value_by_type(new_value, data_type)
+            
+            value_changes[target_column][str(original_value)] = {
+                'value': converted_value,
+                'type': data_type
+            }
+    
+    return column_renames, value_changes
+
 st.sidebar.header("操作ガイド")
 st.sidebar.markdown("""
 CSVファイルをアップロードすると、列名の変更と指定した列の値の変更ができます
+
+**2つの変換方法：**
+1. **入力して変換**: 画面で1つずつ設定
+2. **変換表で変換**: Excelファイルで一括設定
 
 例）
 
@@ -176,175 +225,282 @@ if uploaded_file is not None:
         st.error(f"ファイルの読み込みでエラーが発生しました: {e}")
 
 # ============================================
-# 列名の変更セクション
+# 変換方法選択（タブ形式）
 # ============================================
 if st.session_state.df is not None:
     df = st.session_state.df
     
-    st.subheader("🏷️ 列名の変更")
+    # タブを作成
+    tab1, tab2 = st.tabs(["🔧 入力して変換", "📊 変換表で変換"])
     
-    # 現在の列名リストを取得（既に変更があれば反映）
-    current_columns = list(df.columns)
-    for old_name, new_name in st.session_state.column_renames.items():
-        if old_name in current_columns:
-            idx = current_columns.index(old_name)
-            current_columns[idx] = new_name
-    
-    col1, col2, col3 = st.columns([2, 2, 1])
-    
-    with col1:
-        target_column = st.selectbox(
-            "変更したい列名を選択", 
-            options=list(df.columns),
-            key="column_select"
-        )
-    
-    with col2:
-        new_column_name = st.text_input(
-            "新しい列名を入力", 
-            value="",
-            key="new_column_name"
-        )
-    
-    with col3:
-        if st.button("列名を変更", key="add_column_rename"):
-            if new_column_name and target_column:
-                st.session_state.column_renames[target_column] = new_column_name
-                st.success(f"'{target_column}' → '{new_column_name}' を追加しました")
-                st.rerun()
-    
-    # 現在の列名変更リストを表示
-    if st.session_state.column_renames:
-        st.write("**現在の列名変更予定:**")
-        rename_df = pd.DataFrame([
-            {"元の列名": old, "新しい列名": new, "削除": i} 
-            for i, (old, new) in enumerate(st.session_state.column_renames.items())
-        ])
+    with tab1:
+        # ============================================
+        # 列名の変更セクション
+        # ============================================
+        st.subheader("🏷️ 列名の変更")
         
-        for idx, row in rename_df.iterrows():
-            col_a, col_b = st.columns([3, 3])
-            with col_a:
-                st.text(f"{row['元の列名']} → {row['新しい列名']}")
-
-            with col_b:
-                if st.button("削除", key=f"del_col_{idx}"):
-                    old_name = row["元の列名"]
-                    del st.session_state.column_renames[old_name]
-                    st.rerun()
-
-    # ============================================
-    # 値の変更セクション
-    # ============================================
-    st.subheader("🔄 値の変換")
-    
-    # 値変換の入力フォームと結果表示を2列レイアウトに
-    input_col, stock_col = st.columns([3, 2])
-    
-    with input_col:
-        st.write("**値変換の設定**")
-        # 値変換の入力フォーム
-        col1, col2, col3, col4 = st.columns([2, 0.3, 2, 1.5])
+        # 現在の列名リストを取得（既に変更があれば反映）
+        current_columns = list(df.columns)
+        for old_name, new_name in st.session_state.column_renames.items():
+            if old_name in current_columns:
+                idx = current_columns.index(old_name)
+                current_columns[idx] = new_name
+        
+        col1, col2, col3 = st.columns([2, 2, 1])
         
         with col1:
-            target_value_column = st.selectbox(
-                "変換する列",
+            target_column = st.selectbox(
+                "変更したい列名を選択", 
                 options=list(df.columns),
-                key="value_column_select"
+                key="column_select"
             )
-
-            # 元の値の選択肢を動的に生成
-            if target_value_column:
-                unique_values = get_unique_values(df, target_value_column)
-                old_value = st.selectbox(
-                    "変換前の値",
-                    options=unique_values,
-                    key="old_value_select"
-                )
-            else: 
-                old_value = None
         
         with col2:
-            st.markdown("<div style='text-align: center; padding-top: 95px;'><h2>→</h2></div>", 
-                       unsafe_allow_html=True)
+            new_column_name = st.text_input(
+                "新しい列名を入力", 
+                value="",
+                key="new_column_name"
+            )
         
         with col3:
-            # 列情報の表示
-            if target_value_column:
-                current_dtype = get_dtype_name(df[target_value_column].dtype)
-                unique_count = df[target_value_column].nunique()
-                
-                # 型選択のセレクトボックス
-                target_type = st.selectbox(
-                    "変換後の型",
-                    options=["string", "int", "float", "bool", "factor", "date"],
-                    index=0,  # デフォルトはstring
-                    key="target_type_select"
+            if st.button("列名を変更", key="add_column_rename"):
+                if new_column_name and target_column:
+                    st.session_state.column_renames[target_column] = new_column_name
+                    st.success(f"'{target_column}' → '{new_column_name}' を追加しました")
+                    st.rerun()
+        
+        # 現在の列名変更リストを表示
+        if st.session_state.column_renames:
+            st.write("**現在の列名変更予定:**")
+            rename_df = pd.DataFrame([
+                {"元の列名": old, "新しい列名": new, "削除": i} 
+                for i, (old, new) in enumerate(st.session_state.column_renames.items())
+            ])
+            
+            for idx, row in rename_df.iterrows():
+                col_a, col_b = st.columns([3, 3])
+                with col_a:
+                    st.text(f"{row['元の列名']} → {row['新しい列名']}")
+
+                with col_b:
+                    if st.button("削除", key=f"del_col_{idx}"):
+                        old_name = row["元の列名"]
+                        del st.session_state.column_renames[old_name]
+                        st.rerun()
+
+        # ============================================
+        # 値の変更セクション
+        # ============================================
+        st.subheader("🔄 値の変換")
+        
+        # 値変換の入力フォームと結果表示を2列レイアウトに
+        input_col, stock_col = st.columns([3, 2])
+        
+        with input_col:
+            st.write("**値変換の設定**")
+            # 値変換の入力フォーム
+            col1, col2, col3, col4 = st.columns([2, 0.3, 2, 1.5])
+            
+            with col1:
+                target_value_column = st.selectbox(
+                    "変換する列",
+                    options=list(df.columns),
+                    key="value_column_select"
                 )
 
-                # 新しい値の入力
-                new_value = st.text_input(
-                    "変換後の値",
-                    key="new_value_input"
-                )
-            else:
-                new_value = ""
-                target_type = "string"
-        
-        with col4:
-            # 値変換を追加するボタン
-            st.markdown("<div style='text-align: center; padding-top: 25px;'><h2> </h2></div>", 
-                       unsafe_allow_html=True)
-            if st.button("追加", key="add_value_change"):
-                if target_value_column and old_value is not None and new_value:
-                    # セッション状態に値変換を保存
-                    if target_value_column not in st.session_state.value_changes:
-                        st.session_state.value_changes[target_value_column] = {}
-                    
-                    # 選択された型に変換
-                    converted_value = convert_value_by_type(new_value, target_type)
-                    
-                    # 型情報も一緒に保存
-                    st.session_state.value_changes[target_value_column][str(old_value)] = {
-                        'value': converted_value,
-                        'type': target_type
-                    }
-                    st.success(f"追加: '{old_value}' → '{converted_value}' ({target_type})")
-                    st.rerun()
-    
-    with stock_col:
-        st.write("**変換予定一覧**")
-        
-        if st.session_state.value_changes:
-            total_changes = sum(len(changes) for changes in st.session_state.value_changes.values())
-            st.caption(f"全{len(st.session_state.value_changes)}列, {total_changes}件の変換予定")
+                # 元の値の選択肢を動的に生成
+                if target_value_column:
+                    unique_values = get_unique_values(df, target_value_column)
+                    old_value = st.selectbox(
+                        "変換前の値",
+                        options=unique_values,
+                        key="old_value_select"
+                    )
+                else: 
+                    old_value = None
             
-            for column_name, changes in st.session_state.value_changes.items():
-                st.write(f"**{column_name}**")
+            with col2:
+                st.markdown("<div style='text-align: center; padding-top: 95px;'><h2>→</h2></div>", 
+                           unsafe_allow_html=True)
+            
+            with col3:
+                # 列情報の表示
+                if target_value_column:
+                    current_dtype = get_dtype_name(df[target_value_column].dtype)
+                    unique_count = df[target_value_column].nunique()
+                    
+                    # 型選択のセレクトボックス
+                    target_type = st.selectbox(
+                        "変換後の型",
+                        options=["string", "int", "float", "bool", "factor", "date"],
+                        index=0,  # デフォルトはstring
+                        key="target_type_select"
+                    )
+
+                    # 新しい値の入力
+                    new_value = st.text_input(
+                        "変換後の値",
+                        key="new_value_input"
+                    )
+                else:
+                    new_value = ""
+                    target_type = "string"
+            
+            with col4:
+                # 値変換を追加するボタン
+                st.markdown("<div style='text-align: center; padding-top: 25px;'><h2> </h2></div>", 
+                           unsafe_allow_html=True)
+                if st.button("追加", key="add_value_change"):
+                    if target_value_column and old_value is not None and new_value:
+                        # セッション状態に値変換を保存
+                        if target_value_column not in st.session_state.value_changes:
+                            st.session_state.value_changes[target_value_column] = {}
+                        
+                        # 選択された型に変換
+                        converted_value = convert_value_by_type(new_value, target_type)
+                        
+                        # 型情報も一緒に保存
+                        st.session_state.value_changes[target_value_column][str(old_value)] = {
+                            'value': converted_value,
+                            'type': target_type
+                        }
+                        st.success(f"追加: '{old_value}' → '{converted_value}' ({target_type})")
+                        st.rerun()
+        
+        with stock_col:
+            st.write("**変換予定一覧**")
+            
+            if st.session_state.value_changes:
+                total_changes = sum(len(changes) for changes in st.session_state.value_changes.values())
+                st.caption(f"全{len(st.session_state.value_changes)}列, {total_changes}件の変換予定")
                 
-                for i, (old_val, change_info) in enumerate(changes.items()):
-                    change_col, del_col = st.columns([5, 2])
+                for column_name, changes in st.session_state.value_changes.items():
+                    st.write(f"**{column_name}**")
                     
-                    with change_col:
-                        # 型情報も表示
-                        if isinstance(change_info, dict):
-                            new_val = change_info['value']
-                            val_type = change_info['type']
-                            st.text(f"  {old_val} → {new_val} ({val_type})")
-                        else:
-                            # 旧形式との互換性
-                            st.text(f"  {old_val} → {change_info}")
+                    for i, (old_val, change_info) in enumerate(changes.items()):
+                        change_col, del_col = st.columns([5, 2])
+                        
+                        with change_col:
+                            # 型情報も表示
+                            if isinstance(change_info, dict):
+                                new_val = change_info['value']
+                                val_type = change_info['type']
+                                st.text(f"  {old_val} → {new_val} ({val_type})")
+                            else:
+                                # 旧形式との互換性
+                                st.text(f"  {old_val} → {change_info}")
+                        
+                        with del_col:
+                            if st.button("削除", key=f"del_val_{column_name}_{i}"):
+                                del st.session_state.value_changes[column_name][old_val]
+                                if not st.session_state.value_changes[column_name]:
+                                    del st.session_state.value_changes[column_name]
+                                st.rerun()
+            else:
+                st.info("変換予定はありません")
+    
+    with tab2:
+        # ============================================
+        # 変換表による変換セクション
+        # ============================================
+        st.subheader("📊 変換表による一括変換")
+        
+        # テンプレートダウンロード
+        st.write("**1. 変換表テンプレートをダウンロード**")
+        template_df = create_conversion_template()
+        
+        # テンプレートの説明
+        with st.expander("変換表の使い方"):
+            st.write("""
+            **列の説明:**
+            - **col_original**: 元の列名
+            - **col_new**: 新しい列名
+            - **data_type**: データ型 (string, int, float, bool, factor, date)
+            - **original_value**: 変換前の値（空欄の場合は列名変更のみ）
+            - **new_value**: 変換後の値（空欄の場合は列名変更のみ）
+            
+            **変換ルール:**
+            1. **列名変更**: col_originalとcol_newが異なり、original_valueとnew_valueが空の場合
+            2. **値変換**: original_valueとnew_valueに値がある場合
+            """)
+            
+            st.write("**テンプレート例:**")
+            st.dataframe(template_df, use_container_width=True)
+        
+        # テンプレートをExcelとしてダウンロード
+        from io import BytesIO
+        buffer = BytesIO()
+        template_df.to_excel(buffer, index=False)
+        buffer.seek(0)
+        
+        st.download_button(
+            label="📥 変換表テンプレート.xlsxをダウンロード",
+            data=buffer.getvalue(),
+            file_name="conversion_template.xlsx",
+            mime="application/vnd.openxlsx"
+        )
+        
+        # 変換表のアップロード
+        st.write("**2. 変換表をアップロード**")
+        uploaded_conversion_file = st.file_uploader(
+            "変換表ファイルをアップロード", 
+            type=["xlsx", "xls"],
+            key="conversion_file"
+        )
+        
+        if uploaded_conversion_file is not None:
+            try:
+                conversion_df = pd.read_excel(uploaded_conversion_file)
+                
+                # 必要な列があるかチェック
+                required_columns = ['col_original', 'col_new', 'data_type', 'original_value', 'new_value']
+                missing_columns = [col for col in required_columns if col not in conversion_df.columns]
+                
+                if missing_columns:
+                    st.error(f"変換表に必要な列がありません: {missing_columns}")
+                else:
+                    st.success(f"変換表が正しくアップロードされました（{conversion_df.shape[0]}行の変換設定）")
                     
-                    with del_col:
-                        if st.button("削除", key=f"del_val_{column_name}_{i}"):
-                            del st.session_state.value_changes[column_name][old_val]
-                            if not st.session_state.value_changes[column_name]:
-                                del st.session_state.value_changes[column_name]
+                    # 変換表の内容を表示
+                    st.write("**アップロードされた変換表:**")
+                    st.dataframe(conversion_df, use_container_width=True)
+                    
+                    # 変換表を解析
+                    if st.button("変換表を適用", key="apply_conversion_table"):
+                        try:
+                            column_renames, value_changes = parse_conversion_table(conversion_df)
+                            
+                            # セッション状態を更新
+                            st.session_state.column_renames = column_renames
+                            st.session_state.value_changes = value_changes
+                            
+                            st.success("変換表が正常に適用されました！")
+                            
+                            # 適用された変換の概要を表示
+                            if column_renames:
+                                st.write("**列名変更:**")
+                                for old, new in column_renames.items():
+                                    st.write(f"- {old} → {new}")
+                            
+                            if value_changes:
+                                st.write("**値変換:**")
+                                for column, changes in value_changes.items():
+                                    st.write(f"**{column}列:**")
+                                    for old_val, change_info in changes.items():
+                                        new_val = change_info['value']
+                                        val_type = change_info['type']
+                                        st.write(f"  - {old_val} → {new_val} ({val_type})")
+                            
                             st.rerun()
-        else:
-            st.info("変換予定はありません")
+                            
+                        except Exception as e:
+                            st.error(f"変換表の適用でエラーが発生しました: {e}")
+            
+            except Exception as e:
+                st.error(f"変換表の読み込みでエラーが発生しました: {e}")
 
     # ============================================
-    # 変換実行と結果表示
+    # 変換実行と結果表示（タブの外で共通）
     # ============================================
     st.subheader("変換の実行と結果")
     
@@ -434,10 +590,19 @@ if st.session_state.df is not None:
                     if not is_consistent:
                         type_errors.append(f"列 '{column}': {message}")
                 
+                # 変換結果の検証
+                conversion_errors = []
+                for log in conversion_log:
+                    if log['converted_count'] != log['expected_count']:
+                        conversion_errors.append(
+                            f"列 '{log['column']}': 値 '{log['old_val']}' の変換で不整合が発生しました "
+                            f"(期待: {log['expected_count']}件, 実際: {log['converted_count']}件)"
+                        )
+                
                 # エラーがある場合は警告を表示
-                if type_errors:
+                if type_errors or conversion_errors:
                     st.error("⚠️ 変換でエラーが発生しました:")
-                    for error in type_errors:
+                    for error in type_errors + conversion_errors:
                         st.error(f"• {error}")
                     
                     # エラーがあっても結果は保存（ユーザーが確認できるように）
