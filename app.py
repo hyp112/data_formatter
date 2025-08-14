@@ -182,7 +182,7 @@ def parse_conversion_table(conversion_df):
 # ファイルのアップロード
 # ============================================
 st.subheader("ファイルのアップロード")
-uploaded_file = st.file_uploader("CSVファイルをアップロード", type=["csv"])
+uploaded_file = st.file_uploader("CSVデータの列名と値をノーコードで変換します", type=["csv"])
 
 if uploaded_file is not None:
     try:
@@ -663,4 +663,4 @@ if st.session_state.df is not None:
             st.dataframe(dtype_info_after, use_container_width=True)
 
 else:
-    st.info("👆 まずはCSVファイルをアップロードしてください")
+    st.info("👆 CSVファイルをアップロードしてください")
