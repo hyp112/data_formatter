@@ -437,7 +437,7 @@ if st.session_state.df is not None:
             label="📥 変換表テンプレート.xlsxをダウンロード",
             data=buffer.getvalue(),
             file_name="conversion_template.xlsx",
-            mime="application/vnd.openxlsx"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
         # 変換表のアップロード
