@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import chardet  # エンコーディング検出用
+import io      # BytesIO用
 
 # ============================================
 # ページ設定
@@ -22,8 +24,70 @@ if 'column_renames' not in st.session_state:
 if 'value_changes' not in st.session_state:
     st.session_state.value_changes = {}
 
+def detect_encoding(file_bytes):
+    """ファイルのエンコーディングを検出"""
+    try:
+        result = chardet.detect(file_bytes)
+        detected_encoding = result['encoding']
+        confidence = result['confidence']
+        
+        if detected_encoding is None or confidence < 0.5:
+            return None, confidence
+        
+        # Shift-JIS系の検出精度向上
+        if detected_encoding and 'shift' in detected_encoding.lower():
+            return 'shift_jis', confidence
+        
+        return detected_encoding, confidence
+    except:
+        return None, 0
+
+def read_csv_with_encoding_detection(uploaded_file):
+    """エンコーディングを自動検出してCSVを読み込む"""
+    file_bytes = uploaded_file.getvalue()
+    
+    # エンコーディングを検出
+    detected_encoding, confidence = detect_encoding(file_bytes)
+    
+    # 試行するエンコーディングのリスト（優先順）
+    encodings_to_try = []
+    
+    # 検出されたエンコーディングが信頼できる場合は最優先
+    if detected_encoding and confidence >= 0.5:
+        encodings_to_try.append(detected_encoding)
+    
+    # 日本語でよく使われるエンコーディングを追加
+    common_encodings = [
+        'shift_jis', 'cp932',   # Shift-JIS系を最初に
+        'utf-8', 'UTF-8-BOM',  # UTF-8
+        'euc-jp',  # EUC-JP
+        'iso-2022-jp',  # JIS
+        'latin1',  # Latin-1
+        'cp1252'   # Windows-1252
+    ]
+    
+    # 重複を避けて追加
+    for enc in common_encodings:
+        if enc not in encodings_to_try:
+            encodings_to_try.append(enc)
+    
+    # 各エンコーディングで読み込みを試行
+    last_error = None
+    
+    for encoding in encodings_to_try:
+        try:
+            file_obj = io.BytesIO(file_bytes)
+            df = pd.read_csv(file_obj, encoding=encoding, on_bad_lines='skip')
+            return df, encoding, None
+            
+        except Exception as e:
+            last_error = e
+            continue
+    
+    # すべてのエンコーディングで失敗した場合
+    return None, None, last_error
+
 def get_dtype_name(dtype):
-    """パンダスのデータ型を分かりやすい名前に変換"""
     if pd.api.types.is_integer_dtype(dtype):
         return "int"
     elif pd.api.types.is_float_dtype(dtype):
@@ -40,14 +104,12 @@ def get_dtype_name(dtype):
         return "object"
 
 def get_unique_values(df, column):
-    """指定した列のユニークな値を取得（上限100個）"""
     unique_vals = df[column].dropna().unique()
     if len(unique_vals) > 100:
         return list(unique_vals[:100])
     return list(unique_vals)
 
 def convert_value_by_type(value, target_type):
-    """指定された型に値を変換"""
     try:
         if target_type == "int":
             return int(float(value))  # floatを経由してintに変換（小数点がある場合も対応）
@@ -186,23 +248,28 @@ uploaded_file = st.file_uploader("CSVデータの列名と値をノーコード�
 
 if uploaded_file is not None:
     try:
-        df = pd.read_csv(uploaded_file)
-        st.session_state.df = df.copy()
-        st.success(f"ファイルが正しくアップロードされました（{df.shape[0]}行 × {df.shape[1]}列）")
+        # エンコーディング検出とCSV読み込み
+        df, used_encoding, error = read_csv_with_encoding_detection(uploaded_file)
         
-        # データの概要を表示
-        with st.expander("データの概要を確認"):
-            st.write("**データ型情報:**")
-            dtype_info = pd.DataFrame({
-                '列名': df.columns,
-                'データ型': [get_dtype_name(df[col].dtype) for col in df.columns],
-                'ユニーク数': [df[col].nunique() for col in df.columns],
-                '欠損値数': [df[col].isnull().sum() for col in df.columns]
-            })
-            st.dataframe(dtype_info, use_container_width=True)
+        if df is not None:
+            st.session_state.df = df.copy()
+            st.success(f"ファイルが正しくアップロードされました（{df.shape[0]}行 × {df.shape[1]}列）")
             
-            st.write("**データのプレビュー:**")
-            st.dataframe(df.head(10), use_container_width=True)
+            # データの概要を表示
+            with st.expander("データの概要を確認"):
+                st.write("**データ型情報:**")
+                dtype_info = pd.DataFrame({
+                    '列名': df.columns,
+                    'データ型': [get_dtype_name(df[col].dtype) for col in df.columns],
+                    'ユニーク数': [df[col].nunique() for col in df.columns],
+                    '欠損値数': [df[col].isnull().sum() for col in df.columns]
+                })
+                st.dataframe(dtype_info, use_container_width=True)
+                
+                st.write("**データのプレビュー:**")
+                st.dataframe(df.head(10), use_container_width=True)
+        else:
+            st.error("ファイルの読み込みに失敗しました")
             
     except Exception as e:
         st.error(f"ファイルの読み込みでエラーが発生しました: {e}")
